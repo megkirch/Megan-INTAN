@@ -1,0 +1,114 @@
+function intan_analysis_master(exp_path,exp_type)
+
+cd(exp_path)
+if exist(sprintf('%s/data.mat',exp_path),'file')
+    load(sprintf('%s/data.mat',exp_path))      % data from intan2matlab.m
+else
+    intan2matlab(exp_path);      % data from intan2matlab.m
+    load(sprintf('%s/data.mat',exp_path))      % data from intan2matlab.m
+end
+
+
+% trials - num_trials x 2 matrix of trial start and end times (in seconds)
+% field_trials - trial num x 2 matrix of trial start and end samples (in 
+    % 1000 Hz sampling rate) - starts from 1!
+% time_index - vector of time stamps of each sample (in seconds), with 1000
+    % samples per second - starts from 0!
+% amp_sr - original amplifier sampling rate
+% epoc - vector of 1s and 0s indicating whether each sample was part of a 
+    % trial (1) or not (0). Still in original sampling rate (amp_sr)
+% mmvt -  vector of 1s and 0s indicating whether mouse was running (1) or  
+    % not (0) at time of sample. Still in original sampling rate (amp_sr)
+% encd - vector of analog output from movement encoder. Still in original 
+    % sampling rate (amp_sr)
+% light - is 0 if not an optogenetics experiment, but otherwise, vectors of
+    % whether LED was on (1) or off (0)
+% re - vector for the timestamps (rising phase of photodiode signal). you 
+    % need to remove the first 2 and the last 2 timestamps. Timestamps 
+    % signify the end of a four second black to gray period.
+% photo - vector of analog output from photodiode. In original sampling rate
+
+    
+%% get experiment name and set up where to store results
+full_dir = 'H:\Tlx3project\Augustresults'; 
+out = regexp(exp_path,'\\','split');
+inds = regexp(out{end},'_\d','start');  % looks for what's before an underscore followed immediately by a number; uses that as exp_name
+exp_name = out{end}(1:inds(1)-1);
+exp_dir = strcat(full_dir,'\',exp_name);
+if ~exist(exp_dir)
+    mkdir(exp_dir);     % will save everything in experiment subfolder within Augustresults
+end
+
+%% load clustering info
+% if clustering done with kilosort
+if exist('spike_times.npy','file');       % output of npy2mat.py
+    % load kilosort data
+    spike_times = readNPY('spike_times.npy');           % here, spike times from ALL clusters
+    spike_times_ds = floor(spike_times/(amp_sr/1000));   % change sample #s to account for downsampling
+    clusters = readNPY('spike_clusters.npy');
+    % get cluster group
+    fid = fopen('cluster_groups.csv');
+    % read column headers
+    C_text = textscan(fid, '%s', 1, 'delimiter', ',');
+    % read group info
+    grp_dat = textscan(fid, '%f %s', 'delimiter', ',');
+    fclose(fid);
+    units = grp_dat{1};             % cluster numbers
+    cluster_group = grp_dat{2};     % 'good', 'noise', etc.
+    num_units = length(units); 
+    good_units = units(strcmp(cluster_group,'good'));
+else        % load phy data
+    kwik_file = sprintf('%s/amplifier.kwik',exp_path);
+    info = hdf5info(kwik_file);
+    spike_times = hdf5read(kwik_file, '/channel_groups/0/spikes/time_samples');
+    clusters = hdf5read(kwik_file, '/channel_groups/0/spikes/clusters/main');   % currently only from 1st shank!
+end
+
+% downsample
+LN              = length(epoc);
+div             = amp_sr/1000;
+zx              = 1:div:LN;
+izx             = floor(zx);
+if exist('LED','var')
+%     led = light(izx);
+    [params.all_light,params.pulse_dur,params.lighttime,params.av_light_start] = get_lightstim_v2(exp_path,exp_type);   % just to get duration and time of light onset
+end
+
+%% get the details of the experiment (trial types, prestim time, etc.)
+[params.prestim,params.poststim,params.stimtime,params.trial_type,params.IVs] = get_exp_params(exp_path,exp_type);
+params.onset = .1;         % hardcoded (in sec)
+% params.total_time = prestim+poststim+stimtime;
+params.exp_name = exp_name;
+params.exp_type = exp_type;
+params.amp_sr = amp_sr;
+
+%% run unit analysis for each unit in this experiment
+if exist(sprintf('%s/good_units.txt',exp_path),'file')
+    good_units = load(sprintf('%s/good_units.txt',exp_path));   % if you predetermined which clusters to look at
+% else
+%     good_units = unique(clusters);              % otherwise, look at all clusters (in kilo, this will only be the good ones anyway. but in klusta, it will be everything)
+end
+
+num_units = length(good_units);
+for i = 1:num_units
+    fprintf(sprintf('Performing analysis on %s cluster %s \n',exp_name,num2str(good_units(i))))
+    [unitinfo(i),FRs(i),tuning(i),waveforms(i)] = intan_unit_analysis(good_units(i),field_trials,time_index,spike_times,clusters,params,'prestim',1);
+end
+
+%% save full experimental results
+
+% variable information
+S.vars = params.IVs;
+S.trialinfo = params.trial_type;
+S.exptype = exp_type;
+S.lightconds = unique(params.all_light);
+S.numunits = num_units;
+S.unitinfo = unitinfo;
+S.FRs = FRs;
+S.tuning = tuning;
+S.waveforms = waveforms;
+
+%  save to experiment folder within full_dir
+save(sprintf('%s\\%s_results.mat',exp_dir,exp_name),'S')
+    
+end
