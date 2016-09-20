@@ -23,9 +23,9 @@ end
     % sampling rate (amp_sr)
 % light - is 0 if not an optogenetics experiment, but otherwise, vectors of
     % whether LED was on (1) or off (0)
-% re - vector for the timestamps (rising phase of photodiode signal). you 
-    % need to remove the first 2 and the last 2 timestamps. Timestamps 
-    % signify the end of a four second black to gray period.
+% re - vector for the timestamps (rising phase of photodiode signal) in 
+    % sec. you need to remove the first 2 and the last 2 timestamps. 
+    % Timestamps signify the end of a four second black to gray period.
 % photo - vector of analog output from photodiode. In original sampling rate
 
     
